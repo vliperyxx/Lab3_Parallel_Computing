@@ -1,5 +1,12 @@
 #include <cstdlib>
 #include <mutex>
+#include <shared_mutex>
+#include <condition_variable>
+#include <iostream>
+#include <queue>
+
+using read_lock = std::shared_lock<std::shared_mutex>;
+using write_lock = std::unique_lock<std::shared_mutex>;
 
 class Task {
 private:
@@ -32,3 +39,36 @@ public:
 
 int Task::counter = 0;
 std::mutex Task::counterMutex;
+
+class Queue {
+private:
+    std::queue<Task> tasks;         
+
+    std::shared_mutex m_rw_lock;    
+public:
+    Queue() = default;
+    ~Queue() { clear(); }
+
+    bool empty() {
+        read_lock lock(m_rw_lock);
+        return tasks.empty();
+    }
+
+    int size() {
+        read_lock lock(m_rw_lock);
+        return tasks.size();
+    }
+
+    void clear() {
+        write_lock lock(m_rw_lock);
+        while (!tasks.empty()) {
+            tasks.pop();
+        }
+    }
+};
+
+int main() {
+    srand(time(0));
+
+    return 0;
+}
