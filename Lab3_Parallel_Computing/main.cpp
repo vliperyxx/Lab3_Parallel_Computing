@@ -1,4 +1,4 @@
-#include <cstdlib>
+﻿#include <cstdlib>
 #include <mutex>
 #include <shared_mutex>
 #include <condition_variable>
@@ -141,14 +141,56 @@ public:
         }
         m_initialized = !m_workers.empty();
     }
+    
+    void add_task(const Task& task) {
+        {
+            read_lock lock(m_rw_lock);
+            if (!working_unsafe()) {
+                return;
+            }
+        }
+        m_queue.emplace(task);
+        m_taskWaiter.notify_one();
+    }
+
+    void pause() {
+        write_lock lock(m_rw_lock);
+        if (!working_unsafe()) {
+            return;
+        }
+        m_paused = true;
+    }
+
+    void resume() {
+        {
+            write_lock lock(m_rw_lock);
+            if (!working_unsafe()) {
+                return;
+            }
+            m_paused = false;
+        }
+        m_taskWaiter.notify_all();
+    }
 private:
     mutable std::shared_mutex m_rw_lock;
+    std::condition_variable_any m_taskWaiter;
     std::vector<std::thread> m_workers;
+    Queue m_queue;
 
     bool m_initialized = false;
     bool m_terminated = false;
+    bool m_paused = false;
 
     void routine() {}
+
+    bool working() const {
+        read_lock lock(m_rw_lock);
+        return working_unsafe();
+    }
+
+    bool working_unsafe() const {
+        return m_initialized && !m_terminated;
+    }
 };
 
 int main() {
