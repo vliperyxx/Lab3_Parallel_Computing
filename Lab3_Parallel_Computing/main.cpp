@@ -124,6 +124,33 @@ public:
     }
 };
 
+class ThreadPool {
+public:
+    ThreadPool() = default;
+
+    ~ThreadPool() { terminate(); }
+
+    void initialize(const size_t worker_count) {
+        write_lock lock(m_rw_lock);
+        if (m_initialized || m_terminated) {
+            return;
+        }
+        m_workers.reserve(worker_count);
+        for (size_t id = 0; id < worker_count; id++) {
+            m_workers.emplace_back(&ThreadPool::routine, this);
+        }
+        m_initialized = !m_workers.empty();
+    }
+private:
+    mutable std::shared_mutex m_rw_lock;
+    std::vector<std::thread> m_workers;
+
+    bool m_initialized = false;
+    bool m_terminated = false;
+
+    void routine() {}
+};
+
 int main() {
     srand(time(0));
 
