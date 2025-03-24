@@ -101,6 +101,27 @@ public:
             tasks.pop();
         }
     }
+
+    double getAverageQueueLength() {
+        read_lock lock(m_rw_lock);
+        if (measureCount == 0) {
+            return 0;
+        }
+        else {
+            double averageQueueLength = double(totalQueueLength) / measureCount;
+            return averageQueueLength;
+        }
+    }
+
+    void showStatistics() {
+        read_lock lock(m_rw_lock);
+        std::cout << "\nAverage queue length: " << getAverageQueueLength() << std::endl;
+        std::cout << "Thread wait times:" << std::endl;
+        for (auto& entry : threadWaitTimes) {
+            double waitTimeMs = entry.second / 1000000.0;
+            std::cout << "Thread " << entry.first << ": " << waitTimeMs << " ms" << std::endl;
+        }
+    }
 };
 
 int main() {
