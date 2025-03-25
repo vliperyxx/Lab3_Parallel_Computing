@@ -336,8 +336,43 @@ private:
     bool m_running; 
 };
 
+
 int main() {
     srand(time(0));
+
+    const int workersAmount = 4;        
+    const int numProducers = 2;          
+    const int simulationTime = 60;      
+
+    ThreadPool pool;
+    pool.initialize(workersAmount);
+    pool.start();
+
+    std::vector<std::thread> producerThreads;
+    std::vector<TaskProducer*> producers;
+    for (int i = 0; i < numProducers; i++) {
+        TaskProducer* producer = new TaskProducer(pool);
+        producers.push_back(producer);
+        producerThreads.emplace_back(&TaskProducer::run, producer);
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(simulationTime));
+
+    for (TaskProducer* producer : producers) {
+        producer->stop();
+    }
+
+    for (std::thread& t : producerThreads) {
+        t.join();
+    }
+
+    pool.terminate();
+
+    pool.showStatistics();
+
+    for (TaskProducer* producer : producers) {
+        delete producer;
+    }
 
     return 0;
 }
