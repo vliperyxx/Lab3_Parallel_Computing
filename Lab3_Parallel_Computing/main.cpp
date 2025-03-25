@@ -14,10 +14,8 @@ class Task {
 private:
     int executionTime;
     int id;               
-
     static const int MIN_EXEC_TIME = 3;
     static const int MAX_EXEC_TIME = 6;
-
     static int counter;
     static std::mutex counterMutex;
 
@@ -135,7 +133,6 @@ public:
 class ThreadPool {
 public:
     ThreadPool() = default;
-
     ~ThreadPool() { terminate(); }
 
     void initialize(const size_t worker_count) {
@@ -230,6 +227,31 @@ public:
         m_workers.clear();
         m_initialized = false;
     }
+
+    size_t getTotalTasksExecuted() const {
+        return m_totalTasksExecuted;
+    }
+
+    double getAverageExecutionTime() const {
+        if (m_totalTasksExecuted == 0) {
+            return 0;
+        }
+        else {
+            double average = (double)m_totalTaskExecutionTime / m_totalTasksExecuted;
+            return average;
+        }
+    }
+
+    void showStatistics() {
+        {
+            write_lock lock(m_rw_lock);
+            std::cout << "\nTotal tasks executed: " << getTotalTasksExecuted() << std::endl;
+            std::cout << "Average execution time: " << getAverageExecutionTime() / 1000000 << " ms" << std::endl;
+        }
+
+        std::cout << "\nQueue statistics:" << std::endl;
+        m_queue.showStatistics();
+    }
 private:
     mutable std::shared_mutex m_rw_lock;
     std::condition_variable_any m_taskWaiter;
@@ -287,6 +309,31 @@ private:
     bool working_unsafe() const {
         return m_initialized && !m_terminated;
     }
+};
+
+class TaskProducer {
+public:    
+    TaskProducer(ThreadPool& pool) : m_pool(pool) {}
+
+    static const int MIN_SLEEP_SECONDS = 1;
+    static const int MAX_SLEEP_SECONDS = 5;
+
+    void run() {
+        while (m_running) {
+            Task newTask;
+            m_pool.add_task(newTask);
+            int sleepTime = rand() % (MAX_SLEEP_SECONDS - MIN_SLEEP_SECONDS + 1) + MIN_SLEEP_SECONDS;
+            std::this_thread::sleep_for(std::chrono::seconds(sleepTime));
+        }
+    }
+
+    void stop() {
+        m_running = false;
+    }
+
+private:
+    ThreadPool& m_pool;      
+    bool m_running; 
 };
 
 int main() {
