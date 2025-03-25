@@ -8,6 +8,7 @@
 
 using read_lock = std::shared_lock<std::shared_mutex>;
 using write_lock = std::unique_lock<std::shared_mutex>;
+std::mutex coutMutex;
 
 class Task {
 private:
@@ -49,6 +50,7 @@ private:
     std::map<std::thread::id, long long> threadWaitTimes; 
     std::shared_mutex m_rw_lock;    
     std::condition_variable_any condVar;   
+    bool m_shutdown = false; 
 
     void recordQueueLength() {
         totalQueueLength += tasks.size();
@@ -61,6 +63,12 @@ private:
 public:
     Queue() = default;
     ~Queue() { clear(); }
+
+    void shutdownQueue() {
+        write_lock lock(m_rw_lock);
+        m_shutdown = true;
+        condVar.notify_all();
+    }
 
     void emplace(const Task& task) {
         write_lock lock(m_rw_lock);
@@ -171,17 +179,105 @@ public:
         }
         m_taskWaiter.notify_all();
     }
+
+    void start() {
+        {
+            write_lock lock(m_rw_lock);
+            if (!working_unsafe()) {
+                return;
+            }
+            std::cout << "Thread pool started." << std::endl;
+            m_terminated = false;
+            m_paused = false;
+        }
+        m_taskWaiter.notify_all();
+    }
+
+    void terminate() {
+        {
+            write_lock lock(m_rw_lock);
+            if (working_unsafe()) {
+                m_terminated = true;
+                m_forceStop = true;
+            }
+            else {
+                m_workers.clear();
+                m_terminated = false;
+                m_initialized = false;
+                return;
+            }
+        }
+        m_queue.shutdownQueue();
+        m_taskWaiter.notify_all();
+        for (std::thread& worker : m_workers) {
+            worker.join();
+        }
+        m_workers.clear();
+        m_terminated = false;
+        m_initialized = false;
+    }
+
+    void terminateNow() {
+        {
+            write_lock lock(m_rw_lock);
+            m_terminated = true;
+            m_forceStop = true;
+        }
+        m_taskWaiter.notify_all();
+        for (auto& worker : m_workers) {
+            worker.join();
+        }
+        m_workers.clear();
+        m_initialized = false;
+    }
 private:
     mutable std::shared_mutex m_rw_lock;
     std::condition_variable_any m_taskWaiter;
     std::vector<std::thread> m_workers;
     Queue m_queue;
+    size_t m_totalTasksExecuted = 0;
+    long long m_totalTaskExecutionTime = 0;
 
     bool m_initialized = false;
     bool m_terminated = false;
     bool m_paused = false;
+    bool m_forceStop = false;
 
-    void routine() {}
+    void routine() {
+        while (true) {
+            {
+                write_lock lock(m_rw_lock);
+                while (m_paused && !m_terminated) {
+                    m_taskWaiter.wait(lock);
+                }
+                if (m_terminated || m_forceStop) {
+                    return;
+                }
+            }
+
+            Task task = m_queue.pop();
+            {
+                std::lock_guard<std::mutex> lock(coutMutex);
+                std::cout << "Thread " << std::this_thread::get_id() << " started executing task " << task.getId() << " (duratiion: " << task.getExecutionTime() << " s)" << std::endl;
+            }
+
+            auto start_time = std::chrono::high_resolution_clock::now();
+            std::this_thread::sleep_for(std::chrono::seconds(task.getExecutionTime()));
+            auto end_time = std::chrono::high_resolution_clock::now();
+            long long executionDuration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time).count();
+
+            {
+                std::lock_guard<std::mutex> lock(coutMutex);
+                std::cout << "Thread " << std::this_thread::get_id() << " finished executing task " << task.getId() << std::endl;
+            }
+
+            {
+                write_lock lock(m_rw_lock);
+                m_totalTasksExecuted++;
+                m_totalTaskExecutionTime += executionDuration;
+            }
+        }
+    }
 
     bool working() const {
         read_lock lock(m_rw_lock);
